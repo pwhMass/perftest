@@ -21,15 +21,15 @@
 #define SHMAT_FLAGS (0)
 #define SHMAT_INVALID_PTR ((void *)-1)
 
-#define HUGEPAGE_SIZE_2MB  (2ULL * 1024 * 1024)
-#define HUGEPAGE_SIZE_1GB  (1ULL * 1024 * 1024 * 1024)
+#define HUGEPAGE_SIZE_2MB (2ULL * 1024 * 1024)
+#define HUGEPAGE_SIZE_1GB (1ULL * 1024 * 1024 * 1024)
 
 /* MAP_HUGE_* flags for specifying huge page size (Linux 3.8+) */
 #ifndef MAP_HUGE_2MB
-#define MAP_HUGE_2MB    (21 << 26)  /* 2^21 = 2MB */
+#define MAP_HUGE_2MB (21 << 26) /* 2^21 = 2MB */
 #endif
 #ifndef MAP_HUGE_1GB
-#define MAP_HUGE_1GB    (30 << 26)  /* 2^30 = 1GB */
+#define MAP_HUGE_1GB (30 << 26) /* 2^30 = 1GB */
 #endif
 
 #if !defined(__FreeBSD__)
@@ -39,19 +39,22 @@ int alloc_hugepage_region(int alignment, uint64_t size, void **addr)
 	uint64_t buf_size = (size + HUGEPAGE_SIZE_2MB - 1) & ~(HUGEPAGE_SIZE_2MB - 1);
 
 	huge_shmid = shmget(IPC_PRIVATE, buf_size, SHM_HUGETLB | IPC_CREAT | SHM_R | SHM_W);
-	if (huge_shmid < 0) {
+	if (huge_shmid < 0)
+	{
 		fprintf(stderr, "Failed to allocate hugepages. Please configure hugepages\n");
 		return FAILURE;
 	}
 
 	*addr = (void *)shmat(huge_shmid, SHMAT_ADDR, SHMAT_FLAGS);
-	if (*addr == SHMAT_INVALID_PTR) {
+	if (*addr == SHMAT_INVALID_PTR)
+	{
 		fprintf(stderr, "Failed to attach shared memory region\n");
 		return FAILURE;
 	}
 
 	/* Mark for removal so shmem is freed when process detaches */
-	if (shmctl(huge_shmid, IPC_RMID, 0) != 0) {
+	if (shmctl(huge_shmid, IPC_RMID, 0) != 0)
+	{
 		fprintf(stderr, "Failed to mark shm for removal\n");
 		return FAILURE;
 	}
@@ -61,52 +64,57 @@ int alloc_hugepage_region(int alignment, uint64_t size, void **addr)
 
 /* Allocate via mmap, trying 1GB -> 2MB -> regular pages */
 static int alloc_huge_pages_with_fallback(uint64_t size, void **addr,
-					   enum host_alloc_type *alloc_type,
-					   uint64_t *actual_size, int debug)
+										  enum host_alloc_type *alloc_type,
+										  uint64_t *actual_size, int debug)
 {
-	static const struct {
-		uint64_t             page_size;   /* 0 = regular pages */
-		int                  extra_flags;
+	static const struct
+	{
+		uint64_t page_size; /* 0 = regular pages */
+		int extra_flags;
 		enum host_alloc_type type;
-		const char          *name;
+		const char *name;
 	} opts[] = {
-		{ HUGEPAGE_SIZE_1GB, MAP_HUGETLB | MAP_HUGE_1GB, HOST_ALLOC_MMAP_HUGE_1GB, "1GB"     },
-		{ HUGEPAGE_SIZE_2MB, MAP_HUGETLB | MAP_HUGE_2MB, HOST_ALLOC_MMAP_HUGE_2MB, "2MB"     },
-		{ 0,                 0,                           HOST_ALLOC_MMAP_REGULAR,  "regular" },
+		{HUGEPAGE_SIZE_1GB, MAP_HUGETLB | MAP_HUGE_1GB, HOST_ALLOC_MMAP_HUGE_1GB, "1GB"},
+		{HUGEPAGE_SIZE_2MB, MAP_HUGETLB | MAP_HUGE_2MB, HOST_ALLOC_MMAP_HUGE_2MB, "2MB"},
+		{0, 0, HOST_ALLOC_MMAP_REGULAR, "regular"},
 	};
 	int i;
 
-	for (i = 0; i < 3; i++) {
+	for (i = 0; i < 3; i++)
+	{
 		uint64_t aligned = opts[i].page_size
-			? (size + opts[i].page_size - 1) & ~(opts[i].page_size - 1)
-			: size;
+							   ? (size + opts[i].page_size - 1) & ~(opts[i].page_size - 1)
+							   : size;
 		void *ptr = mmap(NULL, aligned, PROT_READ | PROT_WRITE,
-				 MAP_PRIVATE | MAP_ANONYMOUS | opts[i].extra_flags, -1, 0);
-		if (ptr != MAP_FAILED) {
+						 MAP_PRIVATE | MAP_ANONYMOUS | opts[i].extra_flags, -1, 0);
+		if (ptr != MAP_FAILED)
+		{
 			*addr = ptr;
 			*alloc_type = opts[i].type;
 			*actual_size = aligned;
 			if (debug)
 				printf("[HOST_MEMORY] Allocated %lu bytes using %s pages\n",
-				       (unsigned long)size, opts[i].name);
+					   (unsigned long)size, opts[i].name);
 			return SUCCESS;
 		}
 		if (debug)
 			printf("[HOST_MEMORY] %s pages not available, trying next...\n",
-			       opts[i].name);
+				   opts[i].name);
 	}
 
 	fprintf(stderr, "[HOST_MEMORY] Failed to allocate %lu bytes (errno=%d: %s)\n",
-		(unsigned long)size, errno, strerror(errno));
+			(unsigned long)size, errno, strerror(errno));
 	return FAILURE;
 }
 #endif
 
-int host_memory_init(struct memory_ctx *ctx) {
+int host_memory_init(struct memory_ctx *ctx)
+{
 	return SUCCESS;
 }
 
-int host_memory_destroy(struct memory_ctx *ctx) {
+int host_memory_destroy(struct memory_ctx *ctx)
+{
 	struct host_memory_ctx *host_ctx = container_of(ctx, struct host_memory_ctx, base);
 
 	free(host_ctx);
@@ -114,7 +122,8 @@ int host_memory_destroy(struct memory_ctx *ctx) {
 }
 
 int host_memory_allocate_buffer(struct memory_ctx *ctx, int alignment, uint64_t size, int *dmabuf_fd,
-				uint64_t *dmabuf_offset, void **addr, bool *can_init) {
+								uint64_t *dmabuf_offset, void **addr, bool *can_init)
+{
 	struct host_memory_ctx *host_ctx = container_of(ctx, struct host_memory_ctx, base);
 
 #if defined(__FreeBSD__)
@@ -124,26 +133,34 @@ int host_memory_allocate_buffer(struct memory_ctx *ctx, int alignment, uint64_t 
 #else
 	/* Priority: data_validation -> auto huge pages,
 	 * --use_hugepages -> legacy shmget, otherwise -> memalign */
-	if (host_ctx->use_huge_for_validation) {
+	if (host_ctx->use_huge_for_validation)
+	{
 		if (alloc_huge_pages_with_fallback(size, addr, &host_ctx->alloc_type,
-						    &host_ctx->alloc_size, host_ctx->debug) != SUCCESS) {
+										   &host_ctx->alloc_size, host_ctx->debug) != SUCCESS)
+		{
 			fprintf(stderr, "Failed to allocate memory for data validation.\n");
 			return FAILURE;
 		}
-	} else if (host_ctx->use_hugepages) {
-		if (alloc_hugepage_region(alignment, size, addr) != SUCCESS) {
+	}
+	else if (host_ctx->use_hugepages)
+	{
+		if (alloc_hugepage_region(alignment, size, addr) != SUCCESS)
+		{
 			fprintf(stderr, "Failed to allocate hugepage region.\n");
 			return FAILURE;
 		}
 		host_ctx->alloc_type = HOST_ALLOC_SHMGET;
 		host_ctx->alloc_size = size;
-	} else {
+	}
+	else
+	{
 		*addr = memalign(alignment, size);
 		host_ctx->alloc_type = HOST_ALLOC_MALLOC;
 		host_ctx->alloc_size = size;
 	}
 #endif
-	if (!*addr) {
+	if (!*addr)
+	{
 		fprintf(stderr, "Couldn't allocate work buf.\n");
 		return FAILURE;
 	}
@@ -153,10 +170,12 @@ int host_memory_allocate_buffer(struct memory_ctx *ctx, int alignment, uint64_t 
 	return SUCCESS;
 }
 
-int host_memory_free_buffer(struct memory_ctx *ctx, int dmabuf_fd, void *addr, uint64_t size) {
+int host_memory_free_buffer(struct memory_ctx *ctx, int dmabuf_fd, void *addr, uint64_t size)
+{
 	struct host_memory_ctx *host_ctx = container_of(ctx, struct host_memory_ctx, base);
 
-	switch (host_ctx->alloc_type) {
+	switch (host_ctx->alloc_type)
+	{
 	case HOST_ALLOC_SHMGET:
 		shmdt(addr);
 		break;
@@ -175,7 +194,8 @@ int host_memory_free_buffer(struct memory_ctx *ctx, int dmabuf_fd, void *addr, u
 	return SUCCESS;
 }
 
-struct memory_ctx *host_memory_create(struct perftest_parameters *params) {
+struct memory_ctx *host_memory_create(struct perftest_parameters *params)
+{
 	struct host_memory_ctx *ctx;
 
 	ALLOCATE(ctx, struct host_memory_ctx, 1);

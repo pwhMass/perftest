@@ -2893,6 +2893,64 @@ int create_qp_main(struct pingpong_context *ctx,
 	return ret;
 }
 
+/******************************************************************************
+ * ctx_init_loopback_client - Initialize client context for loopback testing
+ *
+ * This function creates a second pingpong_context that shares the ibv_context
+ * and PD with the server context, but has its own CQs and QPs.
+ ******************************************************************************/
+int ctx_init_loopback_client(struct pingpong_context *ctx_client,
+			     struct perftest_parameters *user_param,
+			     struct pingpong_context *ctx_server)
+{
+	int i;
+	int qp_index = 0;
+
+	/* Share ibv_context and PD from server */
+	ctx_client->context = ctx_server->context;
+	ctx_client->pd = ctx_server->pd;
+	ctx_client->pad = ctx_server->pad;
+
+	/* Share memory resources - loopback uses same memory space */
+	ctx_client->memory = ctx_server->memory;
+	ctx_client->mr = ctx_server->mr;
+	ctx_client->buf = ctx_server->buf;
+
+	/* Create separate CQs for client */
+	if (create_cqs(ctx_client, user_param)) {
+		fprintf(stderr, "Failed to create CQs for loopback client\n");
+		return FAILURE;
+	}
+
+	/* Create QPs for client */
+	for (i = 0; i < user_param->num_of_qps; i++) {
+		if (create_qp_main(ctx_client, user_param, i)) {
+			fprintf(stderr, "Failed to create QP for loopback client\n");
+			goto qps;
+		}
+
+		if (ctx_modify_qp_to_init(ctx_client->qp[i], user_param, i)) {
+			fprintf(stderr, "Failed to modify loopback client QP to INIT\n");
+			goto qps;
+		}
+
+		qp_index++;
+	}
+
+	return SUCCESS;
+
+qps:
+	for (i = 0; i < qp_index; i++) {
+		ibv_destroy_qp(ctx_client->qp[i]);
+	}
+
+	ibv_destroy_cq(ctx_client->send_cq);
+	if (ctx_client->recv_cq)
+		ibv_destroy_cq(ctx_client->recv_cq);
+
+	return FAILURE;
+}
+
 struct ibv_qp* ctx_qp_create(struct pingpong_context *ctx,
 		struct perftest_parameters *user_param, int qp_index)
 {

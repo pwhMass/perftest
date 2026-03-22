@@ -77,6 +77,188 @@ int main(int argc, char *argv[])
 		user_param.num_of_qps *= 2;
 	}
 
+	/* ============== LOOPBACK MODE ============== */
+	if (user_param.loopback) {
+		struct pingpong_context ctx_server, ctx_client;
+		struct pingpong_dest *my_dest_server, *rem_dest_server;
+		struct pingpong_dest *my_dest_client, *rem_dest_client;
+		struct bw_report_data my_bw_rep_lb;
+
+		memset(&ctx_server, 0, sizeof(struct pingpong_context));
+		memset(&ctx_client, 0, sizeof(struct pingpong_context));
+
+		/* Set machine type to CLIENT for proper resource allocation */
+		user_param.machine = CLIENT;
+
+		printf("Running in loopback mode (single process)\n");
+
+		/* Find IB device */
+		ib_dev = ctx_find_dev(&user_param.ib_devname);
+		if (!ib_dev) {
+			fprintf(stderr, " Unable to find the Infiniband/RoCE device\n");
+			goto return_error;
+		}
+
+		/* Open device context */
+		ctx_server.context = ctx_open_device(ib_dev, &user_param);
+		if (!ctx_server.context) {
+			fprintf(stderr, " Couldn't get context for the device\n");
+			free(user_param.ib_devname);
+			goto return_error;
+		}
+
+		/* Verify parameters with device context */
+		if (verify_params_with_device_context(ctx_server.context, &user_param)) {
+			fprintf(stderr, " Couldn't verify params with device context\n");
+			free(user_param.ib_devname);
+			goto return_error;
+		}
+
+		/* Check link type */
+		if (check_link(ctx_server.context, &user_param)) {
+			fprintf(stderr, " Couldn't check link\n");
+			free(user_param.ib_devname);
+			goto return_error;
+		}
+
+		/* Allocate destination structures */
+		MAIN_ALLOC(my_dest_server, struct pingpong_dest, user_param.num_of_qps, return_error);
+		MAIN_ALLOC(rem_dest_server, struct pingpong_dest, user_param.num_of_qps, return_error);
+		MAIN_ALLOC(my_dest_client, struct pingpong_dest, user_param.num_of_qps, return_error);
+		MAIN_ALLOC(rem_dest_client, struct pingpong_dest, user_param.num_of_qps, return_error);
+		memset(my_dest_server, 0, sizeof(struct pingpong_dest) * user_param.num_of_qps);
+		memset(rem_dest_server, 0, sizeof(struct pingpong_dest) * user_param.num_of_qps);
+		memset(my_dest_client, 0, sizeof(struct pingpong_dest) * user_param.num_of_qps);
+		memset(rem_dest_client, 0, sizeof(struct pingpong_dest) * user_param.num_of_qps);
+
+		/* Allocate context arrays for server (will be used by client too) */
+		if (alloc_ctx(&ctx_server, &user_param)) {
+			fprintf(stderr, "Couldn't allocate server context\n");
+			goto loopback_free_dest;
+		}
+
+		/* Initialize server context (creates PD, MR, CQ, QP) */
+		if (ctx_init(&ctx_server, &user_param)) {
+			fprintf(stderr, " Couldn't create server IB resources\n");
+			dealloc_ctx(&ctx_server, &user_param);
+			goto loopback_free_dest;
+		}
+
+		/* For client, allocate QP array and share other resources with server */
+		MAIN_ALLOC(ctx_client.qp, struct ibv_qp*, user_param.num_of_qps, loopback_destroy_server);
+
+		/* Share send/recv resources from server context */
+		ctx_client.wr = ctx_server.wr;
+		ctx_client.sge_list = ctx_server.sge_list;
+		ctx_client.my_addr = ctx_server.my_addr;
+		ctx_client.rem_addr = ctx_server.rem_addr;
+		ctx_client.scnt = ctx_server.scnt;
+		ctx_client.ccnt = ctx_server.ccnt;
+		ctx_client.rem_qpn = ctx_server.rem_qpn;
+
+		/* Initialize client context (shares PD and MR with server) */
+		if (ctx_init_loopback_client(&ctx_client, &user_param, &ctx_server)) {
+			fprintf(stderr, " Couldn't create client IB resources\n");
+			free(ctx_client.qp);
+			destroy_ctx(&ctx_server, &user_param);
+			goto loopback_free_dest;
+		}
+
+		/* Set up connection info for server */
+		if (set_up_connection(&ctx_server, &user_param, my_dest_server)) {
+			fprintf(stderr, " Unable to set up server connection\n");
+			goto loopback_destroy_ctx;
+		}
+
+		/* Set up connection info for client */
+		if (set_up_connection(&ctx_client, &user_param, my_dest_client)) {
+			fprintf(stderr, " Unable to set up client connection\n");
+			goto loopback_destroy_ctx;
+		}
+
+		/* Exchange QP info directly in memory (no network needed) */
+		for (i = 0; i < user_param.num_of_qps; i++) {
+			memcpy(&rem_dest_server[i], &my_dest_client[i], sizeof(struct pingpong_dest));
+			memcpy(&rem_dest_client[i], &my_dest_server[i], sizeof(struct pingpong_dest));
+		}
+
+		/* Connect server QPs */
+		if (ctx_connect(&ctx_server, rem_dest_server, &user_param, my_dest_server)) {
+			fprintf(stderr, " Unable to connect server QPs\n");
+			goto loopback_destroy_ctx;
+		}
+
+		/* Connect client QPs */
+		if (ctx_connect(&ctx_client, rem_dest_client, &user_param, my_dest_client)) {
+			fprintf(stderr, " Unable to connect client QPs\n");
+			goto loopback_destroy_ctx;
+		}
+
+		/* Print test info */
+		ctx_print_test_info(&user_param);
+
+		if (user_param.output == FULL_VERBOSITY) {
+			printf(RESULT_LINE);
+			printf((user_param.report_fmt == MBS ? RESULT_FMT : RESULT_FMT_G));
+			printf(RESULT_EXT);
+		}
+
+		/* Set up send WQEs using client context */
+		ctx_set_send_wqes(&ctx_client, &user_param, rem_dest_client);
+
+		/* Run bandwidth test from client to server */
+		if (run_iter_bw(&ctx_client, &user_param)) {
+			fprintf(stderr, " Failed to run loopback bandwidth test\n");
+			goto loopback_destroy_ctx;
+		}
+
+		/* Print results */
+		print_report_bw(&user_param, &my_bw_rep_lb);
+
+		if (user_param.output == FULL_VERBOSITY) {
+			printf(RESULT_LINE);
+		}
+
+		/* Cleanup */
+		ibv_destroy_cq(ctx_client.send_cq);
+		if (ctx_client.recv_cq)
+			ibv_destroy_cq(ctx_client.recv_cq);
+		for (i = 0; i < user_param.num_of_qps; i++) {
+			ibv_destroy_qp(ctx_client.qp[i]);
+		}
+		free(ctx_client.qp);
+		destroy_ctx(&ctx_server, &user_param);
+
+		free(my_dest_server);
+		free(rem_dest_server);
+		free(my_dest_client);
+		free(rem_dest_client);
+		free(user_param.ib_devname);
+		return SUCCESS;
+
+loopback_destroy_ctx:
+		ibv_destroy_cq(ctx_client.send_cq);
+		if (ctx_client.recv_cq)
+			ibv_destroy_cq(ctx_client.recv_cq);
+		for (i = 0; i < user_param.num_of_qps; i++) {
+			if (ctx_client.qp[i])
+				ibv_destroy_qp(ctx_client.qp[i]);
+		}
+		free(ctx_client.qp);
+
+loopback_destroy_server:
+		destroy_ctx(&ctx_server, &user_param);
+
+loopback_free_dest:
+		free(my_dest_server);
+		free(rem_dest_server);
+		free(my_dest_client);
+		free(rem_dest_client);
+		free(user_param.ib_devname);
+		return FAILURE;
+	}
+	/* ============ END LOOPBACK MODE ============ */
+
 	/* Finding the IB device selected (or default if none is selected). */
 	ib_dev = ctx_find_dev(&user_param.ib_devname);
 	if (!ib_dev) {

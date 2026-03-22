@@ -1001,6 +1001,7 @@ static void init_perftest_params(struct perftest_parameters *user_param)
 	user_param->ai_family			= AF_INET;
 	user_param->report_per_port		= 0;
 	user_param->use_odp			= 0;
+	user_param->loopback			= 0;
 	user_param->use_hugepages		= 0;
 	user_param->use_old_post_send		= 0;
 	user_param->use_promiscuous		= 0;
@@ -2797,6 +2798,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 	static int raw_ipv6_flag = 0;
 	static int report_per_port_flag = 0;
 	static int odp_flag = 0;
+	static int loopback_flag = 0;
 	static int hugepages_flag = 0;
 	static int old_post_send_flag = 0;
 	static int use_promiscuous_flag = 0;
@@ -2994,6 +2996,7 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 			#endif
 			{.name = "report-per-port", .has_arg = 0, .flag = &report_per_port_flag, .val = 1},
 			{.name = "odp", .has_arg = 0, .flag = &odp_flag, .val = 1},
+			{.name = "loopback", .has_arg = 0, .flag = &loopback_flag, .val = 1},
 			{.name = "use_hugepages", .has_arg = 0, .flag = &hugepages_flag, .val = 1},
 			{.name = "use_old_post_send", .has_arg = 0, .flag = &old_post_send_flag, .val = 1},
 			{.name = "promiscuous", .has_arg = 0, .flag = &use_promiscuous_flag, .val = 1},
@@ -3428,6 +3431,9 @@ int parser(struct perftest_parameters *user_param,char *argv[], int argc)
 				}
 				if (odp_flag) {
 					user_param->use_odp = 1;
+				}
+				if (loopback_flag) {
+					user_param->loopback = 1;
 				}
 				/* We statically define memory type options so check if requested option is actually supported. */
 				if (((use_cuda_flag || use_cuda_bus_id_flag) && !cuda_memory_supported()) ||

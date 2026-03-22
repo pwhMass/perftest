@@ -495,6 +495,23 @@ int verify_params_with_device_context(struct ibv_context *ctx,
  */
 int ctx_init(struct pingpong_context *ctx,struct perftest_parameters *user_param);
 
+/* ctx_init_loopback_client
+ *
+ * Description :
+ *	Initialize a second pingpong_context for loopback testing.
+ *	Shares ibv_context and PD with the server context.
+ *
+ * Parameters :
+ *	ctx_client - The client context to initialize.
+ *	user_param - The perftest parameters.
+ *	ctx_server - The server context (already initialized).
+ *
+ * Return Value : SUCCESS, FAILURE.
+ */
+int ctx_init_loopback_client(struct pingpong_context *ctx_client,
+			     struct perftest_parameters *user_param,
+			     struct pingpong_context *ctx_server);
+
 #ifdef HAVE_AES_XTS
 /* set_valid_cred
  *

@@ -705,6 +705,7 @@ struct perftest_parameters {
 	int				validation_chunks_per_qp; /* Dynamic buffer depth */
 	uint32_t			validation_chunk_size;    /* Operations per validation chunk (may differ from tx_depth) */
 	enum validation_mode		validation_mode;
+	int				loopback;                 /* Single-process loopback mode */
 };
 
 struct report_options {
