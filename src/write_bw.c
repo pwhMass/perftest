@@ -121,6 +121,9 @@ int main(int argc, char *argv[])
 			goto return_error;
 		}
 
+		/* Set MTU for loopback mode (set_mtu exits on error) */
+		user_param.curr_mtu = set_mtu(ctx_server.context, user_param.ib_port, user_param.mtu);
+
 		/* Allocate destination structures */
 		MAIN_ALLOC(my_dest_server, struct pingpong_dest, user_param.num_of_qps, return_error);
 		MAIN_ALLOC(rem_dest_server, struct pingpong_dest, user_param.num_of_qps, return_error);
